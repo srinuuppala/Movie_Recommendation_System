@@ -195,15 +195,6 @@ try:
                 else:
                     st.image(FALLBACK_POSTER, width=150)
 
-    st.markdown("---")
-    st.write("Notes:")
-    st.write("- Posters require a TMDB API key. For Streamlit Cloud, put the key in App → Settings → Secrets as `TMDB_API_KEY`.")
-    with st.expander("Debug info"):
-        st.write("Movies shape:", movies_df.shape)
-        st.write("Ratings shape:", ratings.shape)
-        st.write("Links shape:", links.shape)
-        sample_items = list(links_map.items())[:10]
-        st.write("links_map sample:", sample_items)
 
 except Exception as e:
     # show error in UI and prevent app from exiting silently (health check fails)
@@ -211,3 +202,4 @@ except Exception as e:
     # also log to console for Streamlit Cloud logs
     import traceback, sys
     traceback.print_exc(file=sys.stdout)
+
