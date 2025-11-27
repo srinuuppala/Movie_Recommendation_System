@@ -1,7 +1,9 @@
 # streamlit_app.py
 """
-Optimized Streamlit Movie Recommender (content-based) with lazy poster loading.
-Updated Nov 2025: uses `width='stretch'` instead of deprecated use_container_width.
+More defensive Streamlit Movie Recommender.
+- Ensures poster cache depends on TMDB key
+- Better error logging and safer index checks
+- Uses width='stretch' for images (Streamlit 2025)
 """
 
 import os
@@ -11,6 +13,8 @@ import pandas as pd
 import requests
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import traceback
+import sys
 
 # Optional .env support
 try:
@@ -41,12 +45,15 @@ def get_tmdb_key():
         pass
     return os.environ.get("TMDB_API_KEY")
 
-TMDB_API_KEY = get_tmdb_key()
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://api.themoviedb.org/3/movie/{}?api_key={}"
 
 # Fallback poster
 FALLBACK_POSTER = "https://via.placeholder.com/300x450?text=No+Poster"
+
+# Create a single requests session for connection reuse
+_SESSION = requests.Session()
+_SESSION.headers.update({"User-Agent": "movie-recommender/1.0"})
 
 # -------------------------
 # Helpers: load data, features, poster fetch
@@ -78,28 +85,37 @@ def prepare_content_features(movies_df):
     titles = df["title"].tolist()
     return df, cosine_sim, indices, titles
 
+# Important: include tmdb_key in signature so cache depends on it
 @st.cache_data(show_spinner=False)
-def fetch_tmdb_poster_url(tmdb_id: int):
-    if tmdb_id is None or pd.isna(tmdb_id):
-        return None
-    key = get_tmdb_key()
-    if not key:
-        return None
-    url = TMDB_MOVIE_URL.format(int(tmdb_id), key)
+def fetch_tmdb_poster_url(tmdb_id: int, tmdb_key: str = None):
+    """
+    Fetch poster URL for a given TMDB id.
+    tmdb_key parameter ensures cached results change when the API key changes.
+    """
     try:
-        resp = requests.get(url, timeout=8)
-    except requests.exceptions.RequestException:
+        if tmdb_id is None or pd.isna(tmdb_id):
+            return None
+        key = tmdb_key if tmdb_key is not None else get_tmdb_key()
+        if not key:
+            return None
+        url = TMDB_MOVIE_URL.format(int(tmdb_id), key)
+        try:
+            resp = _SESSION.get(url, timeout=6)
+        except Exception:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            data = resp.json()
+        except Exception:
+            return None
+        poster_path = data.get("poster_path")
+        if poster_path:
+            return TMDB_IMAGE_BASE + poster_path
         return None
-    if resp.status_code != 200:
-        return None
-    try:
-        data = resp.json()
     except Exception:
+        # In-case anything unexpected happens, don't crash the app
         return None
-    poster_path = data.get("poster_path")
-    if poster_path:
-        return TMDB_IMAGE_BASE + poster_path
-    return None
 
 @st.cache_data(show_spinner=False)
 def recommend_indices(idx, cosine_sim, topn=10):
@@ -113,93 +129,114 @@ def recommend_indices(idx, cosine_sim, topn=10):
 # App UI (wrapped in try/except to avoid silent crashes)
 # -------------------------
 st.set_page_config(page_title="Movie Recommender", layout="wide")
-try:
-    st.title("🎬 Content-based Movie Recommender (with Posters)")
 
-    # TMDB info expander
-    with st.expander("TMDB info (click to view)"):
-        st.write("TMDB_API_KEY present?:", bool(TMDB_API_KEY))
-        if TMDB_API_KEY:
-            st.write("TMDB_API_KEY (first 8 chars):", TMDB_API_KEY[:8] + "...")
-        st.write("If the API key is missing, set TMDB_API_KEY in your environment or Streamlit Secrets.")
+def main():
+    try:
+        st.title("🎬 Content-based Movie Recommender (with Posters)")
 
-    # Load data
-    with st.spinner("Loading data and building features..."):
-        movies, ratings, tags, links = load_data()
-        movies_df, cosine_sim, indices, titles = prepare_content_features(movies)
+        # TMDB info expander
+        with st.expander("TMDB info (click to view)"):
+            tmdb_key_now = get_tmdb_key()
+            st.write("TMDB_API_KEY present?:", bool(tmdb_key_now))
+            if tmdb_key_now:
+                st.write("TMDB_API_KEY (first 8 chars):", tmdb_key_now[:8] + "...")
+            st.write("If the API key is missing, set TMDB_API_KEY in your environment or Streamlit Secrets.")
 
-    # Build links_map: movieId -> tmdbId (no network calls)
-    links_map = {}
-    if "tmdbId" in links.columns:
-        tmp = links[["movieId", "tmdbId"]].dropna().drop_duplicates(subset=["movieId"])
-        for _, r in tmp.iterrows():
-            try:
-                links_map[int(r["movieId"])] = int(r["tmdbId"])
-            except Exception:
-                continue
+        # Load data
+        with st.spinner("Loading data and building features..."):
+            movies, ratings, tags, links = load_data()
+            movies_df, cosine_sim, indices, titles = prepare_content_features(movies)
 
-    # Search UI
-    st.markdown("<h2>Movie Recommendation System</h2>", unsafe_allow_html=True)
-    query = st.text_input("Search a movie (type and press Enter):", "")
-    if st.button("Random"):
-        import random
-        query = random.choice(titles)
+        # Build links_map: movieId -> tmdbId (no network calls)
+        links_map = {}
+        if "tmdbId" in links.columns:
+            tmp = links[["movieId", "tmdbId"]].dropna().drop_duplicates(subset=["movieId"])
+            for _, r in tmp.iterrows():
+                try:
+                    links_map[int(r["movieId"])] = int(r["tmdbId"])
+                except Exception:
+                    continue
 
-    selected_idx = None
-    if query:
-        matches_exact = movies_df[movies_df["title"].str.lower() == query.strip().lower()]
-        if not matches_exact.empty:
-            selected_idx = matches_exact.index[0]
-        else:
-            matches = movies_df[movies_df["title"].str.contains(query, case=False, na=False)]
-            if not matches.empty:
-                selected_idx = matches.index[0]
+        # Search UI
+        st.markdown("<h2>Movie Recommendation System</h2>", unsafe_allow_html=True)
+        query = st.text_input("Search a movie (type and press Enter):", "")
+        if st.button("Random"):
+            import random
+            query = random.choice(titles)
 
-    if selected_idx is None:
-        selected_idx = 0
+        selected_idx = None
+        if query:
+            matches_exact = movies_df[movies_df["title"].str.lower() == query.strip().lower()]
+            if not matches_exact.empty:
+                selected_idx = matches_exact.index[0]
+            else:
+                matches = movies_df[movies_df["title"].str.contains(query, case=False, na=False)]
+                if not matches.empty:
+                    selected_idx = matches.index[0]
 
-    # Layout
-    col_left, col_right = st.columns([1, 2])
-    with col_left:
-        st.subheader("Selected movie")
-        selected_title = movies_df.loc[selected_idx, "title"]
-        st.write(selected_title)
-        movie_id = int(movies_df.loc[selected_idx, "movieId"])
-        tmdb_id = links_map.get(movie_id, None)
-        poster_url = None
-        if tmdb_id is not None and TMDB_API_KEY:
-            poster_url = fetch_tmdb_poster_url(tmdb_id)
-        if poster_url:
-            st.image(poster_url, width='stretch')
-        else:
-            if not TMDB_API_KEY:
-                st.info("TMDB API key not set — posters disabled.")
-            st.image(FALLBACK_POSTER, width='stretch')
+        if selected_idx is None:
+            selected_idx = 0
 
-    with col_right:
-        st.subheader("Recommended movies")
-        rec_idxs = recommend_indices(selected_idx, cosine_sim, topn=10)
-        rec_cols = st.columns(5)
-        for i, rec_idx in enumerate(rec_idxs):
-            rec_row = movies_df.loc[rec_idx]
-            rec_title = rec_row["title"]
-            rec_movie_id = int(rec_row["movieId"])
-            rec_tmdb = links_map.get(rec_movie_id, None)
-            rec_poster = None
-            if rec_tmdb is not None and TMDB_API_KEY:
-                rec_poster = fetch_tmdb_poster_url(rec_tmdb)
-            with rec_cols[i % 5]:
-                st.caption(rec_title)
-                if rec_poster:
-                    st.image(rec_poster, width='stretch')
-                else:
-                    st.image(FALLBACK_POSTER, width=150)
+        # Safety: ensure selected_idx valid
+        if selected_idx < 0 or selected_idx >= len(movies_df):
+            selected_idx = 0
 
+        # Layout
+        col_left, col_right = st.columns([1, 2])
+        with col_left:
+            st.subheader("Selected movie")
+            selected_title = movies_df.loc[selected_idx, "title"]
+            st.write(selected_title)
+            movie_id = int(movies_df.loc[selected_idx, "movieId"])
+            tmdb_id = links_map.get(movie_id, None)
+            poster_url = None
+            if tmdb_id is not None and get_tmdb_key():
+                # pass current key so cache key includes it
+                poster_url = fetch_tmdb_poster_url(tmdb_id, tmdb_key=get_tmdb_key())
+            if poster_url:
+                st.image(poster_url, width='stretch')
+            else:
+                if not get_tmdb_key():
+                    st.info("TMDB API key not set — posters disabled.")
+                st.image(FALLBACK_POSTER, width='stretch')
 
-except Exception as e:
-    # show error in UI and prevent app from exiting silently (health check fails)
-    st.error("Application error: " + str(e))
-    # also log to console for Streamlit Cloud logs
-    import traceback, sys
-    traceback.print_exc(file=sys.stdout)
+        with col_right:
+            st.subheader("Recommended movies")
+            rec_idxs = recommend_indices(selected_idx, cosine_sim, topn=10)
+            rec_cols = st.columns(5)
+            for i, rec_idx in enumerate(rec_idxs):
+                rec_row = movies_df.loc[rec_idx]
+                rec_title = rec_row["title"]
+                rec_movie_id = int(rec_row["movieId"])
+                rec_tmdb = links_map.get(rec_movie_id, None)
+                rec_poster = None
+                if rec_tmdb is not None and get_tmdb_key():
+                    rec_poster = fetch_tmdb_poster_url(rec_tmdb, tmdb_key=get_tmdb_key())
+                with rec_cols[i % 5]:
+                    st.caption(rec_title)
+                    if rec_poster:
+                        st.image(rec_poster, width='stretch')
+                    else:
+                        st.image(FALLBACK_POSTER, width=150)
 
+        st.markdown("---")
+        st.write("Notes:")
+        st.write("- Posters require a TMDB API key. For Streamlit Cloud, put the key in App → Settings → Secrets as `TMDB_API_KEY`.")
+        with st.expander("Debug info"):
+            st.write("Movies shape:", movies_df.shape)
+            st.write("Ratings shape:", ratings.shape)
+            st.write("Links shape:", links.shape)
+            sample_items = list(links_map.items())[:10]
+            st.write("links_map sample:", sample_items)
+
+        # small control to force rerun if needed
+        if st.button("Restart app"):
+            st.experimental_rerun()
+
+    except Exception as e:
+        # Display friendly error and print full traceback to logs
+        st.error("Application error: " + str(e))
+        traceback.print_exc(file=sys.stdout)
+
+if __name__ == "__main__":
+    main()
