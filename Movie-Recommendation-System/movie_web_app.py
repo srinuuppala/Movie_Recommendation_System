@@ -219,15 +219,7 @@ def main():
                     else:
                         st.image(FALLBACK_POSTER, width=150)
 
-        st.markdown("---")
-        st.write("Notes:")
-        st.write("- Posters require a TMDB API key. For Streamlit Cloud, put the key in App → Settings → Secrets as `TMDB_API_KEY`.")
-        with st.expander("Debug info"):
-            st.write("Movies shape:", movies_df.shape)
-            st.write("Ratings shape:", ratings.shape)
-            st.write("Links shape:", links.shape)
-            sample_items = list(links_map.items())[:10]
-            st.write("links_map sample:", sample_items)
+        
 
         # small control to force rerun if needed
         if st.button("Restart app"):
@@ -240,3 +232,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
