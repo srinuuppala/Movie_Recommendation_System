@@ -17,7 +17,7 @@ This is a perfect ML + NLP portfolio project that demonstrates data preprocessin
 ## 🚀 Live Demo (Optional)
 > Add your Streamlit Cloud link here after deployment:
 ```
-🔗 https://your-app-name.streamlit.app/
+🔗 https://movie-recommendation-system-with-posters.streamlit.app/
 ```
 
 ---
@@ -31,7 +31,7 @@ This is a perfect ML + NLP portfolio project that demonstrates data preprocessin
  ┃ ┣ ratings.csv
  ┃ ┣ tags.csv
  ┃ ┗ links.csv
- ┣ 📄 streamlit_app.py
+ ┣ 📄 movie_web_app.py
  ┣ 📄 requirements.txt
  ┣ 📄 README.md  ← (this file)
  ┣ 📄 posters.json (optional if prefetching)
