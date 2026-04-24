@@ -116,7 +116,7 @@ $Env:TMDB_API_KEY="your_api_key_here"
 
 ### 4️⃣ Run Streamlit App
 ```
-streamlit run streamlit_app.py
+streamlit run movie_web_app.py
 ```
 
 ---
