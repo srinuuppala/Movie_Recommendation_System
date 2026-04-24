@@ -121,21 +121,6 @@ streamlit run streamlit_app.py
 
 ---
 
-## 🌐 Deploying on Streamlit Cloud
-
-1. Upload your project to GitHub  
-2. Go to: https://share.streamlit.io  
-3. Create a new app  
-4. Add this in **Settings → Secrets**:
-
-```
-TMDB_API_KEY = "your_api_key_here"
-```
-
-5. Deploy 🎉
-
----
-
 ## 🎯 Future Enhancements
 - Hybrid Recommender (Content + Collaborative)
 - User-based or Item-based CF
