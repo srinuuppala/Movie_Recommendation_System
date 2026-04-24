@@ -92,7 +92,7 @@ The notebook includes:
 
 ### 1️⃣ Clone the repo
 ```
-git clone https://github.com/<your-username>/Movie-Recommendation-System.git
+git clone https://github.com/srinuuppala/Movie-Recommendation-System.git
 cd Movie-Recommendation-System
 ```
 
